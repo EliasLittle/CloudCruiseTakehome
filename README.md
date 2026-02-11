@@ -1,5 +1,8 @@
 # CloudCruise
 
+<img width="3288" height="3468" alt="image" src="https://github.com/user-attachments/assets/81517a57-5312-43cb-a7d1-c0c8e7c996f5" />
+
+
 A HAR workbench for reverse-engineering APIs. Upload a `.har` file, describe the API you want to find, and get a matching curl command with optional in-browser execute.
 
 Next.js app with TypeScript and shadcn/ui.
