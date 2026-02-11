@@ -25,6 +25,7 @@ yarn-error.log*
 
 # local env files
 .env*.local
+.env
 
 # vercel
 .vercel
@@ -32,3 +33,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# backend (NestJS)
+/backend/dist
+/backend/node_modules
+/backend/filtered-har
+/backend/.env
+
+# tests
+/tests

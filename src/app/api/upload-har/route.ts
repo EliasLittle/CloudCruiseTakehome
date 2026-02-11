@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:3001";
+
 export async function POST(request: Request) {
   const formData = await request.formData();
   const file = formData.get("file") as File | null;
@@ -18,6 +20,40 @@ export async function POST(request: Request) {
     );
   }
 
-  // Generic backend: for now just acknowledge receipt
-  return NextResponse.json({ success: true });
+  try {
+    const backendFormData = new FormData();
+    backendFormData.append("file", file);
+
+    const res = await fetch(`${BACKEND_URL}/extract-har`, {
+      method: "POST",
+      body: backendFormData,
+    });
+
+    const text = await res.text();
+
+    if (!res.ok) {
+      let errorMessage = "Backend request failed.";
+      try {
+        const json = JSON.parse(text) as { message?: string | string[] };
+        if (Array.isArray(json.message)) {
+          errorMessage = json.message[0] ?? errorMessage;
+        } else if (typeof json.message === "string") {
+          errorMessage = json.message;
+        }
+      } catch {
+        if (text) errorMessage = text.slice(0, 200);
+      }
+      return NextResponse.json(
+        { success: false, error: errorMessage },
+        { status: res.status >= 400 && res.status < 600 ? res.status : 502 }
+      );
+    }
+
+    return NextResponse.json({ success: true, curl: text });
+  } catch (err) {
+    return NextResponse.json(
+      { success: false, error: "Could not reach the backend. Is it running?" },
+      { status: 502 }
+    );
+  }
 }

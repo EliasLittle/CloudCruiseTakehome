@@ -17,10 +17,11 @@ export function HarFileUpload() {
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [curlOutput, setCurlOutput] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const validateFile = useCallback((f: File) => {
-    return f.name.toLowerCase().endsWith(".har");
+    return f.name.toLowerCase().endsWith(ACCEPT);
   }, []);
 
   const handleFileChange = useCallback(
@@ -73,6 +74,7 @@ export function HarFileUpload() {
     if (!file) return;
     setStatus("uploading");
     setErrorMessage(null);
+    setCurlOutput(null);
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -87,6 +89,7 @@ export function HarFileUpload() {
         return;
       }
       setStatus("success");
+      setCurlOutput(data.curl ?? "");
     } catch {
       setStatus("error");
       setErrorMessage("Upload failed. Please try again.");
@@ -97,6 +100,7 @@ export function HarFileUpload() {
     setFile(null);
     setStatus("idle");
     setErrorMessage(null);
+    setCurlOutput(null);
   }, []);
 
   return (
@@ -145,7 +149,16 @@ export function HarFileUpload() {
         )}
 
         {status === "success" && (
-          <p className="text-sm text-green-600 dark:text-green-400">Upload successful.</p>
+          <div className="space-y-2">
+            <p className="text-sm text-green-600 dark:text-green-400">Extracted curl command(s):</p>
+            {curlOutput ? (
+              <pre className="max-h-64 overflow-auto rounded-md border border-input bg-muted/50 p-3 text-left text-xs font-mono">
+                <code className="whitespace-pre-wrap break-all">{curlOutput}</code>
+              </pre>
+            ) : (
+              <p className="text-sm text-muted-foreground">No non-HTML requests found in the HAR file.</p>
+            )}
+          </div>
         )}
 
         <div className="flex gap-2">
