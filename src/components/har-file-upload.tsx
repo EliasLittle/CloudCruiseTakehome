@@ -15,6 +15,7 @@ const ACCEPT = ".har";
 
 export function HarFileUpload() {
   const [file, setFile] = useState<File | null>(null);
+  const [apiDescription, setApiDescription] = useState("");
   const [status, setStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [curlOutput, setCurlOutput] = useState<string | null>(null);
@@ -78,6 +79,7 @@ export function HarFileUpload() {
     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("description", apiDescription);
       const res = await fetch("/api/upload-har", {
         method: "POST",
         body: formData,
@@ -94,10 +96,11 @@ export function HarFileUpload() {
       setStatus("error");
       setErrorMessage("Upload failed. Please try again.");
     }
-  }, [file]);
+  }, [file, apiDescription]);
 
   const handleClear = useCallback(() => {
     setFile(null);
+    setApiDescription("");
     setStatus("idle");
     setErrorMessage(null);
     setCurlOutput(null);
@@ -112,6 +115,23 @@ export function HarFileUpload() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <label
+            htmlFor="api-description"
+            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+          >
+            API description
+          </label>
+          <textarea
+            id="api-description"
+            placeholder="Describe the API you want to reverse-engineer (e.g. endpoints, auth, purpose)"
+            value={apiDescription}
+            onChange={(e) => setApiDescription(e.target.value)}
+            rows={3}
+            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-y min-h-[80px]"
+          />
+        </div>
+
         <div
           className={cn(
             "flex min-h-[120px] flex-col items-center justify-center rounded-lg border-2 border-dashed border-input bg-muted/30 px-4 py-6 transition-colors",

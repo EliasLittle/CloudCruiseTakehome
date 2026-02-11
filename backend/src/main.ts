@@ -17,7 +17,10 @@ async function bootstrap() {
       multer({
         storage: multer.memoryStorage(),
         limits: { fileSize: MAX_BODY_SIZE_BYTES },
-      }).single('file')(req, res, (err) => {
+      }).fields([
+        { name: 'file', maxCount: 1 },
+        { name: 'description', maxCount: 1 },
+      ])(req, res, (err) => {
         if (err) next(err);
         else next();
       });

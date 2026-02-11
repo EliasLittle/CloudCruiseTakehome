@@ -25,11 +25,14 @@ export class ExtractHarController {
     console.log('[extract-har] request started');
 
     let harRoot: HarRoot;
+    let description: string | undefined;
 
     if (contentType.includes('application/json')) {
       harRoot = await this.parseJsonBody(req, res);
     } else if (contentType.includes('multipart/form-data')) {
-      harRoot = await this.parseMultipartBody(req, res);
+      const result = await this.parseMultipartBody(req, res);
+      harRoot = result.harRoot;
+      description = result.description;
     } else {
       throw new UnsupportedMediaTypeException(
         'Content-Type must be application/json or multipart/form-data',
@@ -45,6 +48,7 @@ export class ExtractHarController {
 
     const curlText = await this.extractHarService.extractCurlFromHar(
       harRoot.log,
+      description,
     );
 
     const totalMs = Date.now() - startMs;
@@ -76,14 +80,19 @@ export class ExtractHarController {
   private async parseMultipartBody(
     req: Request,
     _res: Response,
-  ): Promise<HarRoot> {
-    const file = (req as Request & { file?: Express.Multer.File & { buffer?: Buffer } }).file;
+  ): Promise<{ harRoot: HarRoot; description?: string }> {
+    const files = (req as Request & { files?: Record<string, Express.Multer.File[]> }).files;
+    const file = files?.['file']?.[0] as (Express.Multer.File & { buffer?: Buffer }) | undefined;
     if (!file || !file.buffer) {
       throw new BadRequestException(
         'multipart/form-data must include a file field with a .har file',
       );
     }
-    return this.parseHarBuffer(file.buffer);
+    const body = (req as Request & { body?: Record<string, unknown> }).body;
+    const description =
+      body?.description != null ? String(body.description).trim() || undefined : undefined;
+    const harRoot = await this.parseHarBuffer(file.buffer);
+    return { harRoot, description };
   }
 
   private parseHarBuffer(buffer: Buffer): HarRoot {

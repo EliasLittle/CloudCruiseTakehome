@@ -21,8 +21,12 @@ export async function POST(request: Request) {
   }
 
   try {
+    const description = formData.get("description");
     const backendFormData = new FormData();
     backendFormData.append("file", file);
+    if (description != null && String(description).trim()) {
+      backendFormData.append("description", String(description).trim());
+    }
 
     const res = await fetch(`${BACKEND_URL}/extract-har`, {
       method: "POST",
