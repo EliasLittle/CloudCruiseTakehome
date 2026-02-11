@@ -78,3 +78,10 @@ export interface MinimalRequestSummary {
   headers: Record<string, string>;
   postData?: { mimeType?: string; text: string };
 }
+
+/**
+ * Request summary plus response status for parse endpoint display.
+ */
+export interface ParseEntry extends RequestSummary {
+  status: number;
+}

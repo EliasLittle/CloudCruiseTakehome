@@ -3,11 +3,24 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { mkdir, writeFile } from 'fs/promises';
-import { join } from 'path';
 import OpenAI from 'openai';
-import { filterAndReduceHarWithMinimal } from './har-filter.util';
-import type { HarLog, MinimalRequestSummary, RequestSummary } from './har.types';
+import {
+  filterAndReduceHarWithStatus,
+  toMinimalRequestSummary,
+} from './har-filter.util';
+import type { HarLog, ParseEntry, RequestSummary } from './har.types';
+
+export interface ParseHarResponse {
+  count: number;
+  entries: ParseEntry[];
+}
+
+export interface MatchResult {
+  curl: string;
+  matchedIndex?: number;
+  confidence?: 'high' | 'medium' | 'low';
+  explanationBullets?: string[];
+}
 
 const OPENAI_MODEL = 'gpt-5-mini';
 
@@ -29,87 +42,42 @@ export class ExtractHarService {
   }
 
   /**
-   * Filter HAR to non-HTML entries, reduce to request summaries, then ask OpenAI to produce curl commands.
-   * If description is provided, the LLM extracts the relevant request(s) matching it, then translates to curl.
-   * Returns plain-text curl command(s), one per request.
+   * Parse HAR and return non-HTML request entries with status (for list display).
    */
-  async extractCurlFromHar(log: HarLog, description?: string | null): Promise<string> {
-    const startMs = Date.now();
-    const { full, minimal } = filterAndReduceHarWithMinimal(log);
-    const filterMs = Date.now() - startMs;
-    console.log(
-      `[extract-har] filterAndReduceHarWithMinimal done in ${filterMs}ms, summaries: ${full.length}`,
-    );
-
-    await this.saveFilteredHar(full, minimal);
-
-    if (minimal.length === 0) {
-      return '';
-    }
-    const curlText = await this.requestCurlFromOpenAi(minimal, description);
-    return curlText.trim();
+  parseHar(log: HarLog): ParseHarResponse {
+    const entries = filterAndReduceHarWithStatus(log);
+    return { count: entries.length, entries };
   }
 
   /**
-   * Write both filtered HAR versions for inspection and tuning.
-   * - backend/filtered-har/last.json: full RequestSummary[] (pretty-printed)
-   * - backend/filtered-har/last.minimal.json: MinimalRequestSummary[] (minified)
+   * Given description and entries, ask LLM to find best-matching request and return curl + explanation.
    */
-  private async saveFilteredHar(
-    full: RequestSummary[],
-    minimal: MinimalRequestSummary[],
-  ): Promise<void> {
-    const dir = join(process.cwd(), 'filtered-har');
-    try {
-      await mkdir(dir, { recursive: true });
-      await writeFile(
-        join(dir, 'last.json'),
-        JSON.stringify(full, null, 2),
-        'utf-8',
-      );
-      await writeFile(
-        join(dir, 'last.minimal.json'),
-        JSON.stringify(minimal),
-        'utf-8',
-      );
-      console.log(`[extract-har] saved filtered HAR to ${dir}/last.json and last.minimal.json`);
-    } catch (err) {
-      console.warn('[extract-har] failed to save filtered HAR:', err);
+  async matchAndCurl(
+    description: string,
+    entries: RequestSummary[],
+  ): Promise<MatchResult> {
+    if (entries.length === 0) {
+      return { curl: '' };
     }
-  }
-
-  private async requestCurlFromOpenAi(
-    minimal: MinimalRequestSummary[],
-    description?: string | null,
-  ): Promise<string> {
+    const minimal = entries.map(toMinimalRequestSummary);
     const client = this.getClient();
     const payload = JSON.stringify(minimal);
-    const hasDescription = description != null && description.trim().length > 0;
-
-    const systemPrompt = hasDescription
-      ? `You are a tool that helps reverse-engineer APIs from HAR (HTTP Archive) data.
+    const systemPrompt = `You are a tool that helps reverse-engineer APIs from HAR (HTTP Archive) data.
 Given a user description of the API they want to reverse-engineer and a JSON array of request objects (each with method, url, headers as object, and optionally postData with mimeType and text):
-1. EXTRACT: Identify the request(s) from the array that best match the user's description.
-2. TRANSLATE: Output ONLY the corresponding curl command(s) for those request(s).
-- One curl command per selected request.
-- Separate multiple curl commands with a single newline.
-- Do not include any explanation, markdown, or extra text.
-- Use -H for each header. The URL already includes query string; use it as-is.`
-      : `You are a tool that converts HTTP request data into curl commands.
-Given a JSON array of request objects (each with method, url, headers as object, and optionally postData with mimeType and text), output ONLY the corresponding curl command(s).
-- One curl command per request.
-- Separate multiple curl commands with a single newline.
-- Do not include any explanation, markdown, or extra text.
-- Use -H for each header. The URL already includes query string; use it as-is.`;
+1. EXTRACT: Identify the SINGLE request from the array (by 0-based index) that best matches the user's description.
+2. OUTPUT: Respond with a valid JSON object only, no markdown or extra text. Use this exact shape:
+{"matchedIndex": <number>, "confidence": "high"|"medium"|"low", "explanationBullets": ["reason 1", "reason 2"], "curl": "<single curl command for that request>"}
+- matchedIndex: 0-based index into the array.
+- confidence: how well the request matches the description.
+- explanationBullets: 2-4 short bullet points explaining why this request matches.
+- curl: the curl command for that one request. Use -H for each header. URL as-is.`;
 
-    const userMessage = hasDescription
-      ? `The user wants to reverse-engineer this API: "${description.trim()}"
+    const userMessage = `The user wants to reverse-engineer this API: "${description.trim()}"
 
-Here are the HTTP requests (JSON array). Extract the request(s) that match the description above, then output ONLY the curl command(s) for those request(s). Nothing else.\n\n${payload}`
-      : `Convert these HTTP requests into curl commands. Output only the curl command(s), nothing else.\n\n${payload}`;
+Here are the HTTP requests (JSON array, 0-based indices). Pick the ONE request that best matches the description, then output ONLY a JSON object with matchedIndex, confidence, explanationBullets, and curl.\n\n${payload}`;
 
     console.log(
-      `[extract-har] calling OpenAI (payload length ${userMessage.length} chars)`,
+      `[extract-har] matchAndCurl calling OpenAI (payload length ${userMessage.length} chars)`,
     );
     const openAiStartMs = Date.now();
 
@@ -128,12 +96,41 @@ Here are the HTTP requests (JSON array). Extract the request(s) that match the d
     }
 
     const openAiMs = Date.now() - openAiStartMs;
-    console.log(`[extract-har] OpenAI responded in ${openAiMs}ms`);
+    console.log(`[extract-har] matchAndCurl OpenAI responded in ${openAiMs}ms`);
 
     const content = completion.choices[0]?.message?.content;
     if (content == null || typeof content !== 'string') {
       throw new BadGatewayException('OpenAI returned no content.');
     }
-    return content;
+
+    return this.parseMatchResult(content, minimal.length);
+  }
+
+  private parseMatchResult(raw: string, maxIndex: number): MatchResult {
+    const trimmed = raw.trim();
+    let jsonStr = trimmed;
+    const codeBlock = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlock) {
+      jsonStr = codeBlock[1].trim();
+    }
+    try {
+      const obj = JSON.parse(jsonStr) as Record<string, unknown>;
+      const curl = typeof obj.curl === 'string' ? obj.curl : '';
+      let matchedIndex: number | undefined;
+      if (typeof obj.matchedIndex === 'number' && Number.isInteger(obj.matchedIndex)) {
+        matchedIndex = Math.max(0, Math.min(obj.matchedIndex, maxIndex - 1));
+      }
+      let confidence: 'high' | 'medium' | 'low' | undefined;
+      if (typeof obj.confidence === 'string' && ['high', 'medium', 'low'].includes(obj.confidence)) {
+        confidence = obj.confidence as 'high' | 'medium' | 'low';
+      }
+      let explanationBullets: string[] | undefined;
+      if (Array.isArray(obj.explanationBullets)) {
+        explanationBullets = obj.explanationBullets.filter((x): x is string => typeof x === 'string');
+      }
+      return { curl, matchedIndex, confidence, explanationBullets };
+    } catch {
+      return { curl: trimmed };
+    }
   }
 }

@@ -21,14 +21,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    const description = formData.get("description");
     const backendFormData = new FormData();
     backendFormData.append("file", file);
-    if (description != null && String(description).trim()) {
-      backendFormData.append("description", String(description).trim());
-    }
 
-    const res = await fetch(`${BACKEND_URL}/extract-har`, {
+    const res = await fetch(`${BACKEND_URL}/extract-har/parse`, {
       method: "POST",
       body: backendFormData,
     });
@@ -53,7 +49,12 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ success: true, curl: text });
+    const data = JSON.parse(text) as { count: number; entries: unknown[] };
+    return NextResponse.json({
+      success: true,
+      count: data.count,
+      entries: data.entries,
+    });
   } catch (err) {
     return NextResponse.json(
       { success: false, error: "Could not reach the backend. Is it running?" },

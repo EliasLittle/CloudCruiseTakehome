@@ -12,7 +12,7 @@ Next.js app with TypeScript and shadcn/ui (boilerplate only).
 npm install
 ```
 
-To use the HAR upload feature (which extracts curl from a HAR file), start the NestJS backend (see **Backend** below). The frontend calls `BACKEND_URL` (default `http://localhost:3001`) via the `/api/upload-har` route. Set `BACKEND_URL` in `.env.local` if your backend runs elsewhere.
+To use the HAR feature, start the NestJS backend (see **Backend** below). The frontend calls `BACKEND_URL` (default `http://localhost:3001`) via `/api/parse-har` and `/api/match-request`. Set `BACKEND_URL` in `.env.local` if your backend runs elsewhere.
 
 ## Scripts
 
@@ -31,7 +31,7 @@ Example: `npx shadcn@latest add card`
 
 ## Backend (NestJS)
 
-The `backend/` directory contains a NestJS API with a single endpoint **POST /extract-har** that filters a HAR file (excluding HTML responses), reduces requests to API-relevant fields, and uses OpenAI to generate curl command(s).
+The `backend/` directory contains a NestJS API with two endpoints for HAR processing.
 
 ### Requirements
 
@@ -49,9 +49,14 @@ npm run start:dev
 
 By default the server listens on port **3001**.
 
-### Endpoint
+### Endpoints
 
-- **POST /extract-har**
-  - **Input**: Either `Content-Type: application/json` with a HAR object `{ "log": { "entries": [...] } }`, or `Content-Type: multipart/form-data` with a `file` field containing a `.har` file.
-  - **Output**: `Content-Type: text/plain` with one curl command per non-HTML request (newline-separated).
-  - HAR size limit: 10 MB.
+- **POST /extract-har/parse**
+  - **Input**: `Content-Type: multipart/form-data` with a `file` field containing a `.har` file, or `Content-Type: application/json` with a HAR object `{ "log": { "entries": [...] } }`.
+  - **Output**: JSON `{ "count": number, "entries": [...] }` — filtered non-HTML requests with method, url, headers, postData, status.
+
+- **POST /extract-har/match**
+  - **Input**: JSON `{ "description": string, "entries": [...] }` (request list from parse).
+  - **Output**: JSON `{ "curl", "matchedIndex?", "confidence?", "explanationBullets?" }` — best-matching request curl and explanation.
+
+- HAR size limit: 10 MB.

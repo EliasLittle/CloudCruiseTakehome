@@ -5,6 +5,7 @@ import type {
   HarRequest,
   RequestSummary,
   MinimalRequestSummary,
+  ParseEntry,
 } from './har.types';
 
 const HTTP2_PSEUDO_HEADERS = new Set([
@@ -73,6 +74,17 @@ export function toRequestSummary(request: HarRequest): RequestSummary {
 export function filterAndReduceHar(log: HarLog): RequestSummary[] {
   const entries = filterNonHtmlEntries(log);
   return entries.map((e) => toRequestSummary(e.request));
+}
+
+/**
+ * Filter HAR to non-HTML entries and reduce each to ParseEntry (RequestSummary + status).
+ */
+export function filterAndReduceHarWithStatus(log: HarLog): ParseEntry[] {
+  const entries = filterNonHtmlEntries(log);
+  return entries.map((e) => ({
+    ...toRequestSummary(e.request),
+    status: e.response?.status ?? 0,
+  }));
 }
 
 /**

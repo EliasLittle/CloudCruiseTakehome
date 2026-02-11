@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { ExtractHarService } from './extract-har.service';
-import type { HarRoot } from './har.types';
+import type { HarRoot, RequestSummary } from './har.types';
 
 const MAX_BODY_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 
@@ -17,45 +17,44 @@ const MAX_BODY_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 export class ExtractHarController {
   constructor(private readonly extractHarService: ExtractHarService) {}
 
-  @Post('extract-har')
-  async extractHar(@Req() req: Request, @Res() res: Response): Promise<void> {
-    const startMs = Date.now();
+  @Post('extract-har/parse')
+  async parseHar(@Req() req: Request, @Res() res: Response): Promise<void> {
     const contentType = req.headers['content-type'] ?? '';
-
-    console.log('[extract-har] request started');
-
     let harRoot: HarRoot;
-    let description: string | undefined;
-
     if (contentType.includes('application/json')) {
       harRoot = await this.parseJsonBody(req, res);
     } else if (contentType.includes('multipart/form-data')) {
-      const result = await this.parseMultipartBody(req, res);
-      harRoot = result.harRoot;
-      description = result.description;
+      harRoot = await this.parseMultipartBody(req, res);
     } else {
       throw new UnsupportedMediaTypeException(
         'Content-Type must be application/json or multipart/form-data',
       );
     }
-
-    const parseMs = Date.now() - startMs;
-    console.log(
-      `[extract-har] body parsed in ${parseMs}ms, entries: ${harRoot.log.entries?.length ?? 0}`,
-    );
-
     this.validateHar(harRoot);
+    const result = this.extractHarService.parseHar(harRoot.log);
+    res.setHeader('Content-Type', 'application/json');
+    res.status(200).json(result);
+  }
 
-    const curlText = await this.extractHarService.extractCurlFromHar(
-      harRoot.log,
-      description,
-    );
-
-    const totalMs = Date.now() - startMs;
-    console.log(`[extract-har] OpenAI returned, sending response (total ${totalMs}ms)`);
-
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.status(200).send(curlText);
+  @Post('extract-har/match')
+  async matchRequest(@Req() req: Request, @Res() res: Response): Promise<void> {
+    const body = (req as Request & { body?: unknown }).body;
+    if (body == null || typeof body !== 'object') {
+      throw new BadRequestException('Request body must be a JSON object');
+    }
+    const obj = body as Record<string, unknown>;
+    const description = obj.description;
+    const entries = obj.entries;
+    if (typeof description !== 'string' || !description.trim()) {
+      throw new BadRequestException('body.description is required and must be a non-empty string');
+    }
+    if (!Array.isArray(entries)) {
+      throw new BadRequestException('body.entries must be an array of request summaries');
+    }
+    const summaries = entries as RequestSummary[];
+    const result = await this.extractHarService.matchAndCurl(description.trim(), summaries);
+    res.setHeader('Content-Type', 'application/json');
+    res.status(200).json(result);
   }
 
   private async parseJsonBody(
@@ -77,10 +76,7 @@ export class ExtractHarController {
     return { log: log as unknown as HarRoot['log'] };
   }
 
-  private async parseMultipartBody(
-    req: Request,
-    _res: Response,
-  ): Promise<{ harRoot: HarRoot; description?: string }> {
+  private async parseMultipartBody(req: Request, _res: Response): Promise<HarRoot> {
     const files = (req as Request & { files?: Record<string, Express.Multer.File[]> }).files;
     const file = files?.['file']?.[0] as (Express.Multer.File & { buffer?: Buffer }) | undefined;
     if (!file || !file.buffer) {
@@ -88,11 +84,7 @@ export class ExtractHarController {
         'multipart/form-data must include a file field with a .har file',
       );
     }
-    const body = (req as Request & { body?: Record<string, unknown> }).body;
-    const description =
-      body?.description != null ? String(body.description).trim() || undefined : undefined;
-    const harRoot = await this.parseHarBuffer(file.buffer);
-    return { harRoot, description };
+    return this.parseHarBuffer(file.buffer);
   }
 
   private parseHarBuffer(buffer: Buffer): HarRoot {
