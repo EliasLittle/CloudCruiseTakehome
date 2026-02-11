@@ -3,6 +3,7 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import harToCurl from 'har-to-curl';
 import OpenAI from 'openai';
 import {
   filterAndReduceHarWithStatus,
@@ -77,8 +78,8 @@ export class ExtractHarService {
       };
     }
 
-    // Step 2: Convert full request to curl
-    const curl = await this.requestToCurl(client, fullRequest);
+    // Step 2: Convert full request to curl (deterministic, no API call)
+    const curl = this.requestToCurl(fullRequest);
 
     return {
       curl,
@@ -146,57 +147,20 @@ Here are the HTTP requests (JSON array, 0-based indices). Pick the ONE request t
   }
 
   /**
-   * Prompt 2: Given full request details, return a curl command.
+   * Convert request to curl using har-to-curl (deterministic, no API call).
    */
-  private async requestToCurl(
-    client: OpenAI,
-    request: RequestSummary,
-  ): Promise<string> {
-    const payload = JSON.stringify({
-      method: request.method,
-      url: request.url,
-      headers: request.headers ?? [],
-      queryString: request.queryString,
-      postData: request.postData,
-    });
-    const systemPrompt = `You convert HTTP request data into a single curl command.
-Given a JSON object with method, url, headers (array of {name, value}), optionally queryString (array of {name, value}), and optionally postData (mimeType, text):
-- Output ONLY a valid JSON object with this shape: {"curl": "<curl command>"}
-- Use -H for each header (except HTTP/2 pseudo-headers like :authority, :method, :path, :scheme).
-- Use -X for the method. Include --data-raw for POST/PUT body when postData.text is present.
-- URL as-is. No markdown or extra text.`;
-
-    const userMessage = `Convert this HTTP request to a curl command. Output only a JSON object with a "curl" field.\n\n${payload}`;
-
-    console.log(
-      `[extract-har] requestToCurl calling OpenAI (payload length ${userMessage.length} chars)`,
-    );
-    const startMs = Date.now();
-
-    let completion: OpenAI.Chat.ChatCompletion;
-    try {
-      completion = await client.chat.completions.create({
-        model: OPENAI_MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage },
-        ],
-        temperature: 1,
-      });
-    } catch (err: unknown) {
-      throw new BadGatewayException(
-        'OpenAI request failed. Please try again: ' + (err instanceof Error ? err.message : String(err)),
-      );
-    }
-
-    console.log(`[extract-har] requestToCurl OpenAI responded in ${Date.now() - startMs}ms`);
-
-    const content = completion.choices[0]?.message?.content;
-    if (content == null || typeof content !== 'string') {
-      throw new BadGatewayException('OpenAI returned no content.');
-    }
-
-    return this.parseCurlResult(content);
+  private requestToCurl(request: RequestSummary): string {
+    const entry = {
+      request: {
+        method: request.method,
+        url: request.url,
+        headers: request.headers ?? [],
+        cookies: [] as Array<{ name: string; value: string }>,
+        postData: request.postData,
+      },
+    };
+    const curl = harToCurl(entry);
+    return typeof curl === 'string' ? curl : '';
   }
 
   private parseMatchOnlyResult(
@@ -232,20 +196,4 @@ Given a JSON object with method, url, headers (array of {name, value}), optional
       return {};
     }
   }
-
-  private parseCurlResult(raw: string): string {
-    const trimmed = raw.trim();
-    let jsonStr = trimmed;
-    const codeBlock = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (codeBlock) {
-      jsonStr = codeBlock[1].trim();
-    }
-    try {
-      const obj = JSON.parse(jsonStr) as Record<string, unknown>;
-      return typeof obj.curl === 'string' ? obj.curl : trimmed;
-    } catch {
-      return trimmed;
-    }
-  }
-
 }

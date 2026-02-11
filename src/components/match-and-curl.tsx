@@ -1,8 +1,12 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  executeRequest,
+  type ExecuteResult,
+} from "@/lib/execute-request";
 import type { ParseEntry } from "@/lib/har-types";
 import type { MatchResult } from "@/lib/har-types";
 
@@ -14,29 +18,6 @@ const SENSITIVE_HEADERS = new Set([
   "api-key",
 ]);
 
-function redactCurl(curl: string): string {
-  const lines = curl.split("\n");
-  const out: string[] = [];
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("-H ") || trimmed.startsWith("--header ")) {
-      const match =
-        trimmed.match(/^-H\s+'([^:]+):/i) ??
-        trimmed.match(/^-H\s+"([^:]+):/i) ??
-        trimmed.match(/^--header\s+'([^:]+):/i) ??
-        trimmed.match(/^--header\s+"([^:]+):/i);
-      if (match) {
-        const headerName = match[1].trim().toLowerCase();
-        if (SENSITIVE_HEADERS.has(headerName)) {
-          out.push(trimmed.replace(/:.*$/, ": ***REDACTED***"));
-          continue;
-        }
-      }
-    }
-    out.push(line);
-  }
-  return out.join("\n");
-}
 
 function getPathname(url: string): string {
   try {
@@ -67,13 +48,13 @@ export function MatchAndCurl({
   onFind,
   entriesCount,
 }: MatchAndCurlProps) {
-  const [redactSecrets, setRedactSecrets] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [executeLoading, setExecuteLoading] = useState(false);
+  const [executeResult, setExecuteResult] = useState<ExecuteResult | null>(null);
+  const [executeError, setExecuteError] = useState<string | null>(null);
 
   const displayCurl = findResult?.curl
-    ? redactSecrets
-      ? redactCurl(findResult.curl)
-      : findResult.curl
+    ? findResult.curl
     : "";
 
   const handleCopy = useCallback(async () => {
@@ -95,6 +76,29 @@ export function MatchAndCurl({
       : null;
 
   const canFind = entriesCount > 0 && apiDescription.trim().length > 0;
+  const canExecute = !!matchedEntry;
+
+  useEffect(() => {
+    setExecuteResult(null);
+    setExecuteError(null);
+  }, [findResult?.matchedIndex]);
+
+  const handleExecute = useCallback(async () => {
+    if (!matchedEntry) return;
+    setExecuteLoading(true);
+    setExecuteError(null);
+    setExecuteResult(null);
+    try {
+      const result = await executeRequest(matchedEntry);
+      setExecuteResult(result);
+    } catch (err) {
+      setExecuteError(
+        err instanceof Error ? err.message : String(err)
+      );
+    } finally {
+      setExecuteLoading(false);
+    }
+  }, [matchedEntry]);
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -179,16 +183,35 @@ export function MatchAndCurl({
                 >
                   {copied ? "Copied!" : "Copy"}
                 </Button>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={redactSecrets}
-                    onChange={(e) => setRedactSecrets(e.target.checked)}
-                    className="rounded border-input"
-                  />
-                  Redact secrets
-                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExecute}
+                  disabled={!canExecute || executeLoading}
+                >
+                  {executeLoading ? "Executing…" : "Execute"}
+                </Button>
               </div>
+
+              {executeError && (
+                <div className="mt-3 rounded border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+                  {executeError}
+                </div>
+              )}
+
+              {executeResult && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-sm font-medium">
+                    Response: {executeResult.status} {executeResult.statusText}
+                  </p>
+                  <pre className="max-h-48 overflow-auto rounded border border-input bg-muted/50 p-3 text-left text-xs font-mono whitespace-pre-wrap break-all">
+                    <code>
+                      {executeResult.body || "(empty body)"}
+                    </code>
+                  </pre>
+                </div>
+              )}
             </CardContent>
           </Card>
         </>
