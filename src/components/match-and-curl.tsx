@@ -10,15 +10,6 @@ import {
 import type { ParseEntry } from "@/lib/har-types";
 import type { MatchResult } from "@/lib/har-types";
 
-const SENSITIVE_HEADERS = new Set([
-  "authorization",
-  "cookie",
-  "x-api-key",
-  "x-auth-token",
-  "api-key",
-]);
-
-
 function getPathname(url: string): string {
   try {
     return new URL(url).pathname;

@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import harToCurl from 'har-to-curl';
 import OpenAI from 'openai';
+import { MAX_PAYLOAD_CHARS, OPENAI_MODEL } from '../constants';
 import {
   filterAndReduceHarWithStatus,
   toMinimalRequestSummary,
@@ -23,9 +24,6 @@ export interface MatchResult {
   explanationBullets?: string[];
 }
 
-const OPENAI_MODEL = 'gpt-5-mini';
-const MAX_PAYLOAD_CHARS = 100_000;
-
 @Injectable()
 export class ExtractHarService {
   private openai: OpenAI | null = null;
@@ -43,19 +41,13 @@ export class ExtractHarService {
     return this.openai;
   }
 
-  /**
-   * Parse HAR and return non-HTML request entries with status (for list display).
-   */
+  /** Parse HAR and return non-HTML request entries with status (for list display). */
   parseHar(log: HarLog): ParseHarResponse {
     const entries = filterAndReduceHarWithStatus(log);
     return { count: entries.length, entries };
   }
 
-  /**
-   * Given description and entries, ask LLM to find best-matching request and return curl + explanation.
-   * Uses two prompts: (1) match minimal requests to description, (2) convert full matched request to curl.
-   * If payload exceeds context limit, splits into batches, matches each, then aggregates best.
-   */
+  /** Find best-matching request by description and return curl + explanation. Batches when payload exceeds context limit. */
   async matchAndCurl(
     description: string,
     entries: RequestSummary[],
@@ -128,15 +120,6 @@ export class ExtractHarService {
     }> = [];
 
     for (const batch of batches) {
-      console.log('[extract-har] batch sent to LLM:', {
-        batchStart: batch.start,
-        batchSize: batch.minimal.length,
-        indexToRequest: batch.minimal.map((m, i) => ({
-          index: i,
-          method: m.method,
-          url: m.url,
-        })),
-      });
       const result = await this.matchRequest(
         client,
         description,
@@ -155,8 +138,6 @@ export class ExtractHarService {
         });
       }
     }
-
-    console.log('batchResults', batchResults);
 
     if (batchResults.length === 0) {
       return {
@@ -354,9 +335,6 @@ Output ONLY a JSON object: {"bestIndex": <number>}`;
     };
   }
 
-  /**
-   * Prompt 1: Given description and minimal requests, return matched index + explanation (no curl).
-   */
   private async matchRequest(
     client: OpenAI,
     description: string,
@@ -380,11 +358,6 @@ Given a user description of the API they want to reverse-engineer and a JSON arr
 
 Here are the HTTP requests (JSON array, 0-based indices). Pick the ONE request that best matches the description. Output ONLY a JSON object with matchedIndex, confidence, and explanationBullets.\n\n${payload}`;
 
-    console.log(
-      `[extract-har] matchRequest calling OpenAI (payload length ${userMessage.length} chars)`,
-    );
-    const startMs = Date.now();
-
     let completion: OpenAI.Chat.ChatCompletion;
     try {
       completion = await client.chat.completions.create({
@@ -401,8 +374,6 @@ Here are the HTTP requests (JSON array, 0-based indices). Pick the ONE request t
       );
     }
 
-    console.log(`[extract-har] matchRequest OpenAI responded in ${Date.now() - startMs}ms`);
-
     const content = completion.choices[0]?.message?.content;
     if (content == null || typeof content !== 'string') {
       throw new BadGatewayException('OpenAI returned no content.');
@@ -411,9 +382,6 @@ Here are the HTTP requests (JSON array, 0-based indices). Pick the ONE request t
     return this.parseMatchOnlyResult(content, minimal.length);
   }
 
-  /**
-   * Convert request to curl using har-to-curl (deterministic, no API call).
-   */
   private requestToCurl(request: RequestSummary): string {
     const entry = {
       request: {
@@ -446,8 +414,6 @@ Here are the HTTP requests (JSON array, 0-based indices). Pick the ONE request t
       const obj = JSON.parse(jsonStr) as Record<string, unknown>;
       let matchedIndex: number | undefined;
       if (typeof obj.matchedIndex === 'number' && Number.isInteger(obj.matchedIndex)) {
-        console.log('obj.matchedIndex', obj.matchedIndex);
-        console.log('maxIndex', maxIndex);
         if (obj.matchedIndex === -1) {
           matchedIndex = -1;
         } else {

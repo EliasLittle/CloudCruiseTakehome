@@ -2,7 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { Request, Response, NextFunction, json } from 'express';
 import multer from 'multer';
 import { AppModule } from './app.module';
-import { MAX_BODY_SIZE_BYTES } from './constants';
+import { DEFAULT_PORT, MAX_BODY_SIZE_BYTES } from './constants';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -12,7 +12,6 @@ async function bootstrap() {
   app.use((req: Request, res: Response, next: NextFunction) => {
     const contentType = req.headers['content-type'] ?? '';
     if (contentType.includes('multipart/form-data')) {
-      console.log('[extract-har] multipart request received, waiting for body...');
       multer({
         storage: multer.memoryStorage(),
         limits: { fileSize: MAX_BODY_SIZE_BYTES },
@@ -28,6 +27,6 @@ async function bootstrap() {
     }
   });
 
-  await app.listen(process.env.PORT ?? 3001);
+  await app.listen(process.env.PORT ?? DEFAULT_PORT);
 }
 bootstrap();

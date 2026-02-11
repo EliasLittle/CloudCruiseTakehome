@@ -1,6 +1,16 @@
 # CloudCruise
 
-Next.js app with TypeScript and shadcn/ui (boilerplate only).
+A HAR workbench for reverse-engineering APIs. Upload a `.har` file, describe the API you want to find, and get a matching curl command with optional in-browser execute.
+
+Next.js app with TypeScript and shadcn/ui.
+
+## Features
+
+- HAR upload (drag-and-drop)
+- Filtered request list with search
+- Natural-language match via OpenAI
+- curl generation
+- In-browser execute
 
 ## Requirements
 
@@ -59,4 +69,4 @@ By default the server listens on port **3001**.
   - **Input**: JSON `{ "description": string, "entries": [...] }` (request list from parse).
   - **Output**: JSON `{ "curl", "matchedIndex?", "confidence?", "explanationBullets?" }` — best-matching request curl and explanation.
 
-- HAR size limit: 10 MB.
+- HAR size limit: 100 MB.

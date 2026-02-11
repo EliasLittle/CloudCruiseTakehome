@@ -1,7 +1,3 @@
-/**
- * Types for parse endpoint response (entries from backend).
- */
-
 export interface HarHeader {
   name: string;
   value: string;
