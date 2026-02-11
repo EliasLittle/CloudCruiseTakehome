@@ -69,11 +69,27 @@ export function toRequestSummary(request: HarRequest): RequestSummary {
 }
 
 /**
+ * Deduplicate by method + url, keeping first occurrence.
+ */
+export function dedupeByUrlAndMethod<T extends { url: string; method: string }>(
+  items: T[],
+): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = `${item.method} ${item.url}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
  * Filter HAR log to non-HTML entries and reduce each to a RequestSummary.
  */
 export function filterAndReduceHar(log: HarLog): RequestSummary[] {
   const entries = filterNonHtmlEntries(log);
-  return entries.map((e) => toRequestSummary(e.request));
+  const reduced = entries.map((e) => toRequestSummary(e.request));
+  return dedupeByUrlAndMethod(reduced);
 }
 
 /**
@@ -81,10 +97,11 @@ export function filterAndReduceHar(log: HarLog): RequestSummary[] {
  */
 export function filterAndReduceHarWithStatus(log: HarLog): ParseEntry[] {
   const entries = filterNonHtmlEntries(log);
-  return entries.map((e) => ({
+  const reduced = entries.map((e) => ({
     ...toRequestSummary(e.request),
     status: e.response?.status ?? 0,
   }));
+  return dedupeByUrlAndMethod(reduced);
 }
 
 /**
@@ -125,12 +142,14 @@ const CURL_DROP_HEADERS = new Set([
   'content-length', // curl sets from body
 ]);
 
+const MAX_POSTDATA_CHARS = 4096;
+
 /**
  * Reduce a RequestSummary to a token-minimal shape for OpenAI curl generation.
  * - Drops queryString (url already contains query).
  * - Drops browser-only / redundant headers.
  * - Compresses headers to Record<name, value>.
- * - postData: only mimeType + text (no params).
+ * - postData: only mimeType + text (no params), text truncated to MAX_POSTDATA_CHARS.
  */
 export function toMinimalRequestSummary(
   summary: RequestSummary,
@@ -147,9 +166,13 @@ export function toMinimalRequestSummary(
     headers: headers,
   };
   if (summary.postData?.text != null) {
+    const text = summary.postData.text;
     out.postData = {
       mimeType: summary.postData.mimeType,
-      text: summary.postData.text,
+      text:
+        text.length > MAX_POSTDATA_CHARS
+          ? text.slice(0, MAX_POSTDATA_CHARS) + '...'
+          : text,
     };
   }
   return out;

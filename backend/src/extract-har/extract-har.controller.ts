@@ -8,10 +8,9 @@ import {
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { MAX_BODY_SIZE_BYTES } from '../constants';
 import { ExtractHarService } from './extract-har.service';
 import type { HarRoot, RequestSummary } from './har.types';
-
-const MAX_BODY_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 @Controller()
 export class ExtractHarController {

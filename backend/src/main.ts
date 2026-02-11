@@ -2,8 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { Request, Response, NextFunction, json } from 'express';
 import multer from 'multer';
 import { AppModule } from './app.module';
-
-const MAX_BODY_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+import { MAX_BODY_SIZE_BYTES } from './constants';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
